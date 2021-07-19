@@ -31,6 +31,9 @@ UI.Menu = new (function() {
 		],
 		[
 			["Check Behavior", "check", function() { UI.Menu.checkBehaviorClicked(); }]
+		],
+		[
+			["Load Task Skeleton", "file_load", function() { UI.Menu.loadTaskClicked(); }]
 		]
 	];
 	var button_config_sm = [
@@ -51,7 +54,7 @@ UI.Menu = new (function() {
 		],
 		[
 			["Hide Comments", "note", function() { UI.Statemachine.toggleComments(); }, "ctrl+h"],
-			["Write Comment", "note_add", function() { UI.Menu.addCommentClicked(); }, "ctrl+4"]
+			["Write Comment", "note_add", function() { UI.Menu.addCommentClicked(); }, "ctrl+4"],
 		],
 		[
 			["Fade Outcomes", "outcome", function() { UI.Statemachine.toggleOutcomes(); }, "ctrl+f"],
@@ -360,4 +363,113 @@ UI.Menu = new (function() {
 		UI.Statemachine.refreshView();
 	}
 
+	this.loadTaskClicked = function() {
+		if (RC.Controller.isReadonly()) return;
+
+		// abort behavior execution if running
+
+		Behavior.resetBehavior();
+		UI.Dashboard.resetAllFields();
+		UI.Statemachine.resetStatemachine();
+
+		// make sure a new behavior always starts at the dashboard
+		UI.Menu.toDashboardClicked();
+		UI.Panels.setActivePanel(UI.Panels.NO_PANEL);
+
+		UI.Dashboard.addBehaviorOutcome('failed');
+		UI.Dashboard.addBehaviorOutcome('finished');
+
+		var sm = new Statemachine("", new WS.StateMachineDefinition(
+			['failed', 'finished'],
+			[],
+			[]
+		));
+
+		var previous_state = undefined;
+
+		// Load task skeleton file
+		file_path = '/root/o2ac-ur/catkin_ws/src/o2ac_flexbe/o2ac_flexbe_behaviors/config/test_pddl'
+		IO.Filesystem.readFile(file_path, (content) => {
+			T.logInfo("Loading task skeleton..." + file_path);
+			for(const line of content.split('\n')){
+				action = line.split(' ')[0];
+				T.logInfo("action: " + action)
+				if (action != undefined && action != ""){
+					var state_type = "";
+					switch (action)
+					{
+						case 'pick':
+							state_type = "o2ac_flexbe_states.PickActionState";
+							break;
+						case 'insert':
+							state_type = "o2ac_flexbe_states.InsertActionState";
+							break;
+						case 'orient':
+							state_type = "o2ac_flexbe_states.OrientActionState";
+							break;
+					}
+					const args = line.split(' ').slice(1);
+					T.logInfo("args: " + args)
+					new_state = new State(line, WS.Statelib.getFromLib(state_type));
+					new_state.setParameterValues(args);
+					if (previous_state != undefined){
+						const pos = previous_state.getPosition();
+						new_state.setPosition({x:parseInt(pos.x+200), y:parseInt(pos.y+90)});
+					}
+					sm.addState(new_state);
+					if (previous_state == undefined){
+						sm.setInitialState(new_state);
+					}else{
+						sm.addTransition(new Transition(previous_state, new_state, 'success', 0));
+					}
+
+					sm.addTransition(new Transition(new_state, sm.getSMOutcomeByName('failed'), 'error', []));
+					previous_state = new_state
+				}
+			}
+			sm.addTransition(new Transition(previous_state, sm.getSMOutcomeByName('finished'), 'success', []));
+			const pos = previous_state.getPosition();
+			sm.getSMOutcomeByName('finished').setPosition({x: pos.x+200, y: pos.y+50})
+
+		});
+
+		// Generate basic information
+
+		Behavior.setBehaviorPackage("o2ac_flexbe_behaviors");
+		Behavior.setBehaviorName("Task Skeleton to Flexbe");
+		Behavior.setBehaviorDescription("test");
+		Behavior.setTags("PDDL");
+		Behavior.setAuthor("Cristian Beltran");
+		Behavior.setCreationDate(Date.now());
+		
+		// Load that info into the UI Dashboard
+		
+		UI.Dashboard.setBehaviorName(Behavior.getBehaviorName());
+		UI.Dashboard.setBehaviorPackage(Behavior.getBehaviorPackage());
+		UI.Dashboard.setBehaviorDescription(Behavior.getBehaviorDescription());
+		UI.Dashboard.setBehaviorTags(Behavior.getTags());
+		UI.Dashboard.setBehaviorAuthor(Behavior.getAuthor());
+		UI.Dashboard.setBehaviorAuthor(Behavior.getAuthor());
+		
+		private_vars = {
+			'a_bot':'"a_bot"',
+			'b_bot':'"b_bot"',
+			'taskboard':'"taskboard"',
+			'assembly':'"assembly"',
+			'shaft':'"shaft"',
+			'end_cap':'"end_cap"',
+		}
+		for (const [key, value] of Object.entries(private_vars)) {
+			UI.Dashboard.addPrivateVariable(key, value);
+		}
+
+		Behavior.setStatemachine(sm);
+
+		UI.Statemachine.resetStatemachine();
+			
+			
+		UI.Panels.Terminal.show();
+		UI.refreshView();
+		ActivityTracer.resetActivities();
+	}
 }) ();
